@@ -1,6 +1,8 @@
+from datetime import datetime, timezone, timedelta
 from importlib import resources
 import json
 import pathlib
+import subprocess
 
 import bottle
 
@@ -141,3 +143,70 @@ def files(filepath=""):
             else:
                 files.append(item.relative_to(path))
         return bottle.template('files', dirs=dirs, files=files)
+
+# Timezone routes
+
+@app.route('/time')
+def time_editor():
+    return bottle.template('time')
+
+@app.get('/api/get_time')
+def get_time():
+    tz = timezone(timedelta())
+    server_time = datetime.now(tz).isoformat()
+    bottle.response.content_type = 'application/json'
+    return {"server_time": server_time}
+
+
+def update_time_by_ntp(server_address):
+    ntp_args = ["ntpdate", "-u", server_address]
+    p = subprocess.Popen(
+        ntp_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        _, errs = p.communicate(timeout=20)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        _, errs = p.communicate()
+        bottle.response.status = 500
+        return {"status": "error", "msg": "NTP update timeout"}
+
+    if p.returncode != 0:
+        bottle.response.status = 500
+        return {"status": "error", "msg": f"NTP update failed: {errs.decode()}"}
+
+    tz = timezone(timedelta())
+    server_time = datetime.now(tz).isoformat()
+    return {"server_time": server_time}
+
+
+@app.post('/api/update_time')
+def update_time():
+    data = bottle.request.json
+
+    update_mode = data.get("update_mode")
+    if not update_mode:
+        bottle.response.status = 400
+        return {"status": "error", "msg": "update_mode is required"}
+
+    if update_mode == "ntp":
+        server_address = data.get("server_address")
+        return update_time_by_ntp(server_address)
+
+    elif update_mode == "manual":
+        manual_time = data.get("manual_time")
+        if not manual_time:
+            bottle.response.status = 400
+            return {"status": "error", "msg": "manual_time is required"}
+        
+        try:
+            # Update system time manually
+            manual_time = datetime.strptime(manual_time, "%Y-%m-%d %H:%M:%S")
+            subprocess.run(["date", "-s", manual_time.strftime("%Y-%m-%d %H:%M:%S")], check=True)
+            return {"status": "success", "msg": "Server time updated manually"}
+        except Exception as e:
+            bottle.response.status = 500
+            return {"status": "error", "msg": f"Failed to set manual time: {str(e)}"}
+
+    else:
+        bottle.response.status = 400
+        return {"status": "error", "msg": f"unknown update_mode: {update_mode}"}
