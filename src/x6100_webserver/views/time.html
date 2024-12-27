@@ -1,11 +1,13 @@
 % rebase('base.html', title='Time Editor')
 <p>Welcome to X6100 alternative firmware configuration editor.</p>
 
+<h3>Time Information</h3>
 <table>
     <thead>
         <tr>
             <th>Local Time</th>
             <th>Server Time</th>
+            <th>Server Timezone</th>
         </tr>
     </thead>
     <tbody>
@@ -14,13 +16,15 @@
                 <p id="local-time">Loading Local Time...</p>
             </td>
             <td>
-                <p id="server-time">Unfetch Server Time</p>
+                <p id="server-time">Fetching Server Time...</p>
+            </td>
+            <td colspan="2">
+                <p><span id="server-timezone">Fetching Server Timezone...</span></p>
             </td>
         </tr>
     </tbody>
 </table>
 
-<button id="get-time-btn">Fetch Server Time</button>
 <button id="sync-local-time-btn">Sync Local Time to Server</button>
 
 <h3>Manually Update Server Time</h3>
@@ -34,7 +38,11 @@
 <input id="custom-ntp" type="text" placeholder="Input Custom NTP Server Address" style="display: none;">
 <button id="update-time-btn">Update Time</button>
 
-
+<h3>Set Server Timezone</h3>
+<p>Select Timezone or Input Custom Timezone:</p>
+<select id="timezone-select"></select>
+<input id="custom-timezone" type="text" placeholder="e.g., Asia/Shanghai" style="display: none;">
+<button id="set-timezone-btn">Set Timezone</button>
 
 <script>
     // Some Constants
@@ -48,6 +56,53 @@
         { value: "ntp.tencent.com", label: "ntp.tencent.com (China)" },
         { value: "custom", label: "Custom NTP Server..." }
     ];
+
+    const timezones = [
+        "UTC",
+        "America/Los_Angeles",
+        "America/New_York",
+        "Asia/Shanghai",
+        "Asia/Tokyo",
+        "Australia/Sydney",
+        "Europe/London",
+        "Europe/Moscow",
+        "Europe/Paris",
+        "custom" // Custom Timezone option
+    ];
+
+    // Timezone Functions
+    function fetchCurrentTimezone() {
+        $.ajax({
+            url: "/api/get_timezone",
+            method: "GET",
+            success: function (response) {
+                $("#server-timezone").text(response.timezone || "Unknown");
+            },
+            error: function () {
+                $("#server-timezone").text("Error fetching timezone");
+            }
+        });
+    }
+
+    function setTimezone(timezone) {
+        $.ajax({
+            url: "/api/set_timezone",
+            method: "POST",
+            contentType: "application/json",
+            data: JSON.stringify({ timezone: timezone }),
+            success: function (response) {
+                if (response.success) {
+                    alert("Timezone updated successfully!");
+                    fetchCurrentTimezone();
+                } else {
+                    alert("Failed to update timezone: " + response.message);
+                }
+            },
+            error: function () {
+                alert("Failed to update timezone. Please try again.");
+            }
+        });
+    }
 
     // Update Local Time Every Second
     let serverTimeOffset = null;
@@ -156,6 +211,40 @@
         }
     });
 
+    // Populate Timezone Dropdown
+    const timezoneSelect = document.getElementById("timezone-select");
+    timezones.forEach(tz => {
+        const option = document.createElement("option");
+        option.value = tz;
+        option.textContent = tz === "custom" ? "Custom Timezone..." : tz;
+        timezoneSelect.appendChild(option);
+    });
+
+    timezoneSelect.addEventListener("change", function () {
+        const customInput = document.getElementById("custom-timezone");
+        if (this.value === "custom") {
+            customInput.style.display = "block";
+        } else {
+            customInput.style.display = "none";
+        }
+    });
+
+    // Event Listeners
+    $("#set-timezone-btn").click(function () {
+        const selectedTimezone = $("#timezone-select").val();
+        const customTimezone = $("#custom-timezone").val().trim();
+
+        // Use custom timezone if selected, else use dropdown selection
+        const timezone = selectedTimezone === "custom" ? customTimezone : selectedTimezone;
+
+        if (!timezone) {
+            alert("Please select or input a timezone.");
+            return;
+        }
+
+        setTimezone(timezone);
+    });
+
     // Event Listeners
     $("#update-time-btn").click(function () {
         const selectedNtp = $("#ntp-servers").val();
@@ -183,10 +272,10 @@
 
     $("#sync-local-time-btn").click(syncLocalTime);
 
-    $("#get-time-btn").click(getServerTime);
-
     // Initialize Local Time and Server Time
+    fetchCurrentTimezone();
     getLocalTime();
+    getServerTime();
     setInterval(getLocalTime, 1000);
     setInterval(updateServerTime, 1000);
 </script>
